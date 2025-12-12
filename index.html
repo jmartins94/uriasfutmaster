@@ -211,7 +211,7 @@ let state = { playersQueue: [], teams: [], payments: {}, clearPaymentsOnLoad: fa
 function save(){ localStorage.setItem(KEY, JSON.stringify(state)); if(firebaseEnabled) pushStateToFirebase(); }
 function load(){ const v=localStorage.getItem(KEY); if(v){ try{ const p=JSON.parse(v); state = {...state, ...p}; }catch(e){console.warn(e);} } if(state.clearPaymentsOnLoad) state.payments={}; }
 
-function formatTime(s){ const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return ${m}:${sec}; }
+function formatTime(s){ const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `${m}:${sec}`; }
 function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } }
 
 // DOM refs
@@ -387,7 +387,7 @@ document.addEventListener('click', (e)=>{
 
 function promptMoveToTeamFromQueue(queueIdx){
   if(state.teams.length===0){ alert('Não há times ainda. Forme um time primeiro.'); return; }
-  const names = state.teams.map((t, i)=> (${i}) Time ${String.fromCharCode(65+i)} — ${t.length}/5).join('\n');
+  const names = state.teams.map((t, i)=> `(${i}) Time ${String.fromCharCode(65+i)} — ${t.length}/5`).join('\n');
   const resp = prompt('Escolha o time de destino digitando o número entre parênteses:\n' + names);
   if(resp===null) return;
   const ti = Number(resp);
@@ -399,7 +399,7 @@ function promptMoveToTeamFromQueue(queueIdx){
 }
 
 function promptMovePlayer(teamIdx, playerIdx){
-  const names = ['Fila (digite -1)'].concat(state.teams.map((t,i)=> (${i}) Time ${String.fromCharCode(65+i)} — ${t.length}/5));
+  const names = ['Fila (digite -1)'].concat(state.teams.map((t,i)=> `(${i}) Time ${String.fromCharCode(65+i)} — ${t.length}/5`));
   const resp = prompt('Mover para:\n' + names.join('\n') );
   if(resp===null) return;
   const v = Number(resp);
@@ -433,13 +433,26 @@ function handleTeamLoss(teamIndex){
 }
 
 /* payments */
+function renderPayments(){
+  paymentsList.innerHTML = '';
+  const players = uniquePlayers();
+  if(players.length === 0){ paymentsList.innerHTML = '<div class="small">Nenhum jogador</div>'; return; }
+  players.forEach(name=>{
+    const checked = state.payments[name] ? 'checked' : '';
+    const row = document.createElement('div');
+    row.innerHTML = `<label style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="chk-paid" data-name="${escapeAttr(name)}" ${checked}> <span>${escape(name)}</span></label>`;
+    paymentsList.appendChild(row);
+  });
+}
+
 paymentsList.addEventListener('change', (e)=>{
   if(e.target && e.target.classList && e.target.classList.contains('chk-paid')){
     const name = e.target.dataset.name; state.payments[name] = e.target.checked; save();
   }
 });
+
 document.getElementById('btnClearPayments').addEventListener('click', ()=>{ if(!confirm('Limpar todas as marcações de pagamento?')) return; state.payments={}; renderAll(); });
-document.getElementById('btnExportPayments').addEventListener('click', ()=>{ const rows = uniquePlayers().map(n=>${n}\t${state.payments[n] ? 'Pago' : 'Nao pago'}); navigator.clipboard.writeText(rows.join('\n')).then(()=> alert('Pagamentos copiados (nome[TAB]status)')); });
+document.getElementById('btnExportPayments').addEventListener('click', ()=>{ const rows = uniquePlayers().map(n=> `${n}\t${state.payments[n] ? 'Pago' : 'Nao pago'}`); navigator.clipboard.writeText(rows.join('\n')).then(()=> alert('Pagamentos copiados (nome[TAB]status)')); });
 
 /* drag end cleanup */
 queueList.addEventListener('dragover', (e)=> e.preventDefault());
