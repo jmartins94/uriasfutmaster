@@ -153,6 +153,12 @@ button{background:var(--panel);color:var(--gold);border:2px solid var(--gold);pa
 
 <script>
 /* =========================
+   CONFIG
+   ========================= */
+// Toggle Firebase synchronization. Set to true to enable remote sync via Firebase RTDB.
+const ENABLE_FIREBASE = true; // per your choice: enabled
+
+/* =========================
    FIREBASE CONFIG (SEU)
    ========================= */
 const firebaseConfig = {
@@ -168,35 +174,49 @@ const firebaseConfig = {
 
 let firebaseEnabled = false;
 let dbRef = null;
+
 function enableFirebaseIfConfigured(){
   try{
+    if(!ENABLE_FIREBASE) return false;
     if(!firebaseConfig || !firebaseConfig.databaseURL) return false;
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
     dbRef = db.ref('futpro_rotacao');
     firebaseEnabled = true;
-    // initial load
-    dbRef.once('value', snap=>{
+
+    // initial load: merge based on updatedAt timestamp
+    dbRef.once('value').then(snap => {
       const remote = snap.val();
       if(remote && remote.state){
-        state = remote.state;
-        renderAll();
+        const remoteState = remote.state;
+        if(!state.updatedAt || (remoteState.updatedAt && remoteState.updatedAt > state.updatedAt)){
+          state = {...state, ...remoteState};
+          console.info('Firebase: applied remote state');
+          renderAll();
+        } else {
+          console.info('Firebase: kept local state (newer)');
+          pushStateToFirebase();
+        }
       }
-    });
-    // listen for remote changes
+    }).catch(e=>console.warn('firebase once error', e));
+
+    // listen for remote changes and apply only if remote is newer
     dbRef.on('value', snap=>{
       const remote = snap.val();
       if(remote && remote.state){
-        state = remote.state;
-        renderAll();
+        const remoteState = remote.state;
+        if(!state.updatedAt || (remoteState.updatedAt && remoteState.updatedAt > state.updatedAt)){
+          state = {...state, ...remoteState};
+          console.info('Firebase: merged remote update');
+          renderAll();
+        }
       }
     });
+
     return true;
-  }catch(e){
-    console.warn('Firebase init error', e);
-    return false;
-  }
+  }catch(e){ console.warn('Firebase init error', e); return false; }
 }
+
 function pushStateToFirebase(){
   if(!firebaseEnabled || !dbRef) return;
   try{ dbRef.set({ state }); }catch(e){ console.warn(e); }
@@ -206,9 +226,9 @@ function pushStateToFirebase(){
    APP STATE & STORAGE
    ========================= */
 const KEY = 'futpro_v3_3_state';
-let state = { playersQueue: [], teams: [], payments: {}, clearPaymentsOnLoad: false, timerSeconds: 7*60, soundOn: true };
+let state = { playersQueue: [], teams: [], payments: {}, clearPaymentsOnLoad: false, timerSeconds: 7*60, soundOn: true, updatedAt: Date.now() };
 
-function save(){ localStorage.setItem(KEY, JSON.stringify(state)); if(firebaseEnabled) pushStateToFirebase(); }
+function save(){ state.updatedAt = Date.now(); localStorage.setItem(KEY, JSON.stringify(state)); if(firebaseEnabled) pushStateToFirebase(); }
 function load(){ const v=localStorage.getItem(KEY); if(v){ try{ const p=JSON.parse(v); state = {...state, ...p}; }catch(e){console.warn(e);} } if(state.clearPaymentsOnLoad) state.payments={}; }
 
 function formatTime(s){ const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `${m}:${sec}`; }
@@ -254,7 +274,6 @@ function renderTeams(){
   teamsContainer.innerHTML='';
   state.teams.forEach((team, tIndex)=>{
     const teamLabel = String.fromCharCode(65 + tIndex);
-    // determine status
     let statusLabel = '';
     let statusClass = '';
     if(tIndex === 0){ statusLabel = 'Jogando'; statusClass = 'status-playing-1'; }
@@ -342,33 +361,32 @@ btnAdd.addEventListener('click', ()=>{
 });
 inputPlayer.addEventListener('keydown', (e)=>{ if(e.key==='Enter') btnAdd.click(); });
 
-// FIXED: Sortear os 10 primeiros e manter o resto em sequência
+// Sortear os 10 primeiros e formar A/B (sem afetar ordem do restante)
 document.getElementById('btnFormTeams').addEventListener('click', ()=>{
   if(state.playersQueue.length < 10){
     alert('Precisa ter ≥10 jogadores na fila para sortear os 10 primeiros.');
     return;
   }
 
-  // pegar os 10 primeiros sem alterar o restante por referência
+  // pegar os 10 primeiros usando slice
   const first10 = state.playersQueue.slice(0,10);
-
-  // atualizar a fila para remover os 10 primeiros (mantendo ordem do restante)
+  // remover os 10 primeiros da fila (mantendo o restante na mesma ordem)
   state.playersQueue = state.playersQueue.slice(10);
 
-  // embaralhar apenas os 10 capturados
+  // embaralhar apenas estes 10
   shuffle(first10);
 
   const teamA = first10.slice(0,5);
   const teamB = first10.slice(5,10);
 
-  // inserir A e B no início da lista de times (A primeiro, B depois)
+  // inserir A e B no início (A primeiro, depois B)
   state.teams.unshift(teamB);
   state.teams.unshift(teamA);
 
-  // garantir entrada em payments
+  // garantir pagamentos
   teamA.concat(teamB).forEach(p => state.payments[p] = state.payments[p] || false);
 
-  // formar os times restantes em sequência a partir da fila (sem embaralhar)
+  // formar times restantes em sequência a partir da fila
   createTeamsFromQueue();
 
   renderAll();
@@ -379,7 +397,13 @@ document.getElementById('btnMakeNext').addEventListener('click', ()=>{ if(state.
 document.getElementById('btnShuffle').addEventListener('click', ()=>{ if(confirm('Embaralhar fila?')){ shuffle(state.playersQueue); renderAll(); } });
 document.getElementById('btnExport').addEventListener('click', ()=>{ const txt = state.playersQueue.join('\n'); navigator.clipboard.writeText(txt).then(()=> alert('Fila copiada para área de transferência (texto).')); });
 document.getElementById('btnImport').addEventListener('click', ()=>{ const txt = prompt('Cole lista (um por linha):'); if(!txt) return; const arr = txt.split(/\r?\n/).map(s=>s.trim()).filter(Boolean); state.playersQueue.push(...arr); arr.forEach(p=> state.payments[p] = state.payments[p]||false); renderAll(); });
-document.getElementById('btnReset').addEventListener('click', ()=>{ if(!confirm('Nova Noite: limpar dados (fila, times e pagamentos)?')) return; state.playersQueue=[]; state.teams=[]; state.payments={}; state.timerSeconds = 7*60; renderAll(); });
+
+// Nova Noite: limpar state e permitir novos nomes imediatamente
+document.getElementById('btnReset').addEventListener('click', ()=>{
+  if(!confirm('Nova Noite: limpar dados (fila, times e pagamentos)?')) return;
+  state.playersQueue=[]; state.teams=[]; state.payments={}; state.timerSeconds = 7*60; save(); renderAll();
+});
+
 document.getElementById('btnKeepWinner').addEventListener('click', ()=>{ alert('O vencedor é mantido automaticamente — use "Time X perdeu" para mover o perdedor ao final.'); });
 
 /* delegated handlers for queue */
@@ -557,7 +581,7 @@ function onTimerEndPrompt(){ if(state.teams.length<2){ alert('Tempo acabou — n
 window.addEventListener('load', ()=>{
   load();
   renderAll();
-  try{ if(enableFirebaseIfConfigured()){ console.log('Firebase enabled'); } }catch(e){ console.warn(e); }
+  try{ if(ENABLE_FIREBASE && enableFirebaseIfConfigured()){ console.log('Firebase enabled'); } }catch(e){ console.warn(e); }
   setInterval(save,2000);
   window.futpro = { state, renderAll, performMove };
 });
