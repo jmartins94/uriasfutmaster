@@ -189,17 +189,17 @@ function enableFirebaseIfConfigured(){
   const remote = snap.val();
   if (remote && remote.state) {
     const remoteState = remote.state;
-    // remember remote for future decisions
+    // lembrar remoto para decisões futuras
     lastRemoteUpdatedAt = remoteState.updatedAt || null;
     lastRemoteState = remoteState;
 
-    // if remote is newer -> apply remote
+    // se remoto é mais novo -> aplicar remoto
     if (!state.updatedAt || (remoteState.updatedAt && remoteState.updatedAt > state.updatedAt)) {
-      state = { ...state, ...remoteState };
+      state = {...state, ...remoteState};
       console.info('Firebase: applied remote state');
       renderAll();
     }
-    // if local appears newer than remote -> ask user before overwriting server
+    // se local parece mais novo -> pedir confirmação antes de sobrescrever o servidor
     else if (state.updatedAt && (!remoteState.updatedAt || state.updatedAt > remoteState.updatedAt)) {
       try {
         const overwrite = confirm(
@@ -209,13 +209,13 @@ function enableFirebaseIfConfigured(){
           pushStateToFirebaseImmediate();
           console.info('Firebase: user chose to push local state to server');
         } else {
-          state = { ...state, ...remoteState };
+          state = {...state, ...remoteState};
           console.info('Firebase: user chose to keep remote state');
           renderAll();
         }
       } catch (e) {
         console.warn('Prompt blocked or error', e);
-        state = { ...state, ...remoteState };
+        state = {...state, ...remoteState};
         renderAll();
       }
     } else {
@@ -223,7 +223,7 @@ function enableFirebaseIfConfigured(){
       if (remoteState.updatedAt !== state.updatedAt) { pushStateToFirebaseImmediate(); }
     }
   } else {
-    // no remote state -> push local to server
+    // sem estado remoto -> enviar local
     pushStateToFirebaseImmediate();
   }
 }).catch(e => console.warn('firebase once error', e));
