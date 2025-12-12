@@ -343,15 +343,35 @@ btnAdd.addEventListener('click', ()=>{
 });
 inputPlayer.addEventListener('keydown', (e)=>{ if(e.key==='Enter') btnAdd.click(); });
 
+// NEW: btnFormTeams behavior as requested:
+// - remove the first 10 from the queue
+// - shuffle ONLY those 10
+// - create team A and B from them (A then B at the start of teams list)
+// - then form remaining teams in sequence from the remaining queue (no other shuffles)
 document.getElementById('btnFormTeams').addEventListener('click', ()=>{
-  if(state.playersQueue.length < 10){ alert('Precisa ter ≥10 jogadores na fila para sortear os 10 primeiros.'); return; }
+  if(state.playersQueue.length < 10){
+    alert('Precisa ter ≥10 jogadores na fila para sortear os 10 primeiros.');
+    return;
+  }
+  // take the first 10 (removing from queue)
   const first10 = state.playersQueue.splice(0,10);
+
+  // shuffle only these 10
   shuffle(first10);
+
   const teamA = first10.slice(0,5);
   const teamB = first10.slice(5,10);
-  state.teams = [teamA, teamB, ...state.teams];
-  teamA.concat(teamB).forEach(p=> state.payments[p] = state.payments[p] || false);
+
+  // place teams A and B at the beginning (A then B)
+  state.teams.unshift(teamB);
+  state.teams.unshift(teamA);
+
+  // ensure payments entries exist
+  teamA.concat(teamB).forEach(p => state.payments[p] = state.payments[p] || false);
+
+  // create remaining teams in sequence from the current queue (no shuffling)
   createTeamsFromQueue();
+
   renderAll();
 });
 
@@ -534,25 +554,11 @@ document.getElementById('btnTestWhistle').addEventListener('click', async ()=>{
 
 function onTimerEndPrompt(){ if(state.teams.length<2){ alert('Tempo acabou — não há teams suficientes para registrar derrota.'); return; } if(confirm('Tempo encerrado. Registrar derrota do time da frente (Time 1)? OK = Time 1 perdeu, Cancelar = Time 2 perdeu')){ handleTeamLoss(0); } else { handleTeamLoss(1); } }
 
-/* ========== SORTEIO / FORMAR TIMES AUTOMÁTICO ========== */
-function sortAndFormInitial(){
-  if(state.playersQueue.length < 10){ alert('Precisa ter pelo menos 10 jogadores na fila para sortear os 10 primeiros.'); return; }
-  const first10 = state.playersQueue.splice(0,10);
-  shuffle(first10);
-  const a = first10.slice(0,5);
-  const b = first10.slice(5,10);
-  state.teams = [a,b, ...state.teams];
-  a.concat(b).forEach(p=> state.payments[p] = state.payments[p] || false);
-  createTeamsFromQueue();
-  renderAll();
-}
-
 /* ========== INIT & LOAD ========== */
 window.addEventListener('load', ()=>{
   load();
   renderAll();
   try{ if(enableFirebaseIfConfigured()){ console.log('Firebase enabled'); } }catch(e){ console.warn(e); }
-  document.getElementById('btnFormTeams').addEventListener('click', sortAndFormInitial);
   setInterval(save,2000);
   window.futpro = { state, renderAll, performMove };
 });
