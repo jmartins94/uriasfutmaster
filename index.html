@@ -186,41 +186,47 @@ function enableFirebaseIfConfigured(){
 
     // initial load: merge based on updatedAt timestamp
     dbRef.once('value').then(snap => {
-      const remote = snap.val();
-      if(remote && remote.state){
-        const remoteState = remote.state;
-        if(!state.updatedAt || (remoteState.updatedAt && remoteState.updatedAt > state.updatedAt)){
-          state = {...state, ...remoteState};
-          console.info('Firebase: applied remote state');
-          renderAll();
+  const remote = snap.val();
+  if (remote && remote.state) {
+    const remoteState = remote.state;
+    // remember remote for future decisions
+    lastRemoteUpdatedAt = remoteState.updatedAt || null;
+    lastRemoteState = remoteState;
+
+    // if remote is newer -> apply remote
+    if (!state.updatedAt || (remoteState.updatedAt && remoteState.updatedAt > state.updatedAt)) {
+      state = { ...state, ...remoteState };
+      console.info('Firebase: applied remote state');
+      renderAll();
+    }
+    // if local appears newer than remote -> ask user before overwriting server
+    else if (state.updatedAt && (!remoteState.updatedAt || state.updatedAt > remoteState.updatedAt)) {
+      try {
+        const overwrite = confirm(
+          'Detectei que existem dados LOCAIS mais recentes. Deseja sobrescrever o servidor com seus dados locais?\\n\\nOK = sobrescrever servidor com seus dados locais\\nCancelar = manter os dados do servidor'
+        );
+        if (overwrite) {
+          pushStateToFirebaseImmediate();
+          console.info('Firebase: user chose to push local state to server');
         } else {
-          console.info('Firebase: kept local state (newer)');
-          pushStateToFirebase();
-        }
-      }
-    }).catch(e=>console.warn('firebase once error', e));
-
-    // listen for remote changes and apply only if remote is newer
-    dbRef.on('value', snap=>{
-      const remote = snap.val();
-      if(remote && remote.state){
-        const remoteState = remote.state;
-        if(!state.updatedAt || (remoteState.updatedAt && remoteState.updatedAt > state.updatedAt)){
-          state = {...state, ...remoteState};
-          console.info('Firebase: merged remote update');
+          state = { ...state, ...remoteState };
+          console.info('Firebase: user chose to keep remote state');
           renderAll();
         }
+      } catch (e) {
+        console.warn('Prompt blocked or error', e);
+        state = { ...state, ...remoteState };
+        renderAll();
       }
-    });
-
-    return true;
-  }catch(e){ console.warn('Firebase init error', e); return false; }
-}
-
-function pushStateToFirebase(){
-  if(!firebaseEnabled || !dbRef) return;
-  try{ dbRef.set({ state }); }catch(e){ console.warn(e); }
-}
+    } else {
+      console.info('Firebase: kept local state (newer or equal)');
+      if (remoteState.updatedAt !== state.updatedAt) { pushStateToFirebaseImmediate(); }
+    }
+  } else {
+    // no remote state -> push local to server
+    pushStateToFirebaseImmediate();
+  }
+}).catch(e => console.warn('firebase once error', e));
 
 /* =========================
    APP STATE & STORAGE
