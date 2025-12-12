@@ -262,7 +262,6 @@ function renderTeams(){
     else if(tIndex === 2){ statusLabel = 'Próximo'; statusClass = 'status-next'; }
     else { statusLabel = 'Aguardando'; statusClass = 'status-waiting'; }
     const card = document.createElement('div'); card.className='team-card';
-    const isIncomplete = team.length < 5;
     const playersHtml = team.map((p, idx)=> `<div class="player-item" draggable="true" data-origin="team" data-team="${tIndex}" data-idx="${idx}" >
       <div class="player-role">${idx+1}</div><div class="player-name">${escape(p)}</div>
       <div style="display:flex;gap:6px">
@@ -343,33 +342,33 @@ btnAdd.addEventListener('click', ()=>{
 });
 inputPlayer.addEventListener('keydown', (e)=>{ if(e.key==='Enter') btnAdd.click(); });
 
-// NEW: btnFormTeams behavior as requested:
-// - remove the first 10 from the queue
-// - shuffle ONLY those 10
-// - create team A and B from them (A then B at the start of teams list)
-// - then form remaining teams in sequence from the remaining queue (no other shuffles)
+// FIXED: Sortear os 10 primeiros e manter o resto em sequência
 document.getElementById('btnFormTeams').addEventListener('click', ()=>{
   if(state.playersQueue.length < 10){
     alert('Precisa ter ≥10 jogadores na fila para sortear os 10 primeiros.');
     return;
   }
-  // take the first 10 (removing from queue)
-  const first10 = state.playersQueue.splice(0,10);
 
-  // shuffle only these 10
+  // pegar os 10 primeiros sem alterar o restante por referência
+  const first10 = state.playersQueue.slice(0,10);
+
+  // atualizar a fila para remover os 10 primeiros (mantendo ordem do restante)
+  state.playersQueue = state.playersQueue.slice(10);
+
+  // embaralhar apenas os 10 capturados
   shuffle(first10);
 
   const teamA = first10.slice(0,5);
   const teamB = first10.slice(5,10);
 
-  // place teams A and B at the beginning (A then B)
+  // inserir A e B no início da lista de times (A primeiro, B depois)
   state.teams.unshift(teamB);
   state.teams.unshift(teamA);
 
-  // ensure payments entries exist
+  // garantir entrada em payments
   teamA.concat(teamB).forEach(p => state.payments[p] = state.payments[p] || false);
 
-  // create remaining teams in sequence from the current queue (no shuffling)
+  // formar os times restantes em sequência a partir da fila (sem embaralhar)
   createTeamsFromQueue();
 
   renderAll();
