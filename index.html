@@ -156,7 +156,7 @@ button{background:var(--panel);color:var(--gold);border:2px solid var(--gold);pa
    CONFIG
    ========================= */
 // Toggle Firebase synchronization. Set to true to enable remote sync via Firebase RTDB.
-const ENABLE_FIREBASE = true; // per your choice: enabled
+const ENABLE_FIREBASE = true; // enabled
 
 /* =========================
    FIREBASE CONFIG (SEU)
@@ -196,18 +196,11 @@ let isEditing = false;
 let lastRemoteUpdatedAt = null;
 let lastRemoteState = null;
 
-// allows auto-push only after lock acquired / confirmed
-let allowAutoPush = false;
-
 /* =========================
    FIREBASE INIT & SYNC
    ========================= */
 function schedulePushStateToFirebase() {
   if (!firebaseEnabled || !dbRef) return;
-  if (!allowAutoPush) {
-    console.info('Auto-push skipped: client has not acquired lock/confirmation yet.');
-    return;
-  }
   if (_pushTimeout) clearTimeout(_pushTimeout);
   _pushTimeout = setTimeout(() => {
     try {
@@ -224,10 +217,6 @@ function schedulePushStateToFirebase() {
 
 function pushStateToFirebaseImmediate() {
   if (!firebaseEnabled || !dbRef) return;
-  if (!allowAutoPush) {
-    console.info('Immediate push skipped: client has not acquired lock/confirmation yet.');
-    return;
-  }
   try {
     if (canPushToFirebase()) {
       dbRef.set({ state });
@@ -263,12 +252,7 @@ function tryAcquireLock(){
     }
     return;
   }).then(result => {
-    const acquired = !!(result && result.committed && result.snapshot && result.snapshot.val() && result.snapshot.val().owner === clientId);
-    if(acquired){
-      // permit auto pushes now
-      allowAutoPush = true;
-    }
-    return acquired;
+    return result && result.committed && result.snapshot && result.snapshot.val() && result.snapshot.val().owner === clientId;
   }).catch(e => { console.warn('lock tx err', e); return false; });
 }
 
@@ -282,8 +266,6 @@ function refreshLock(){
 
 function releaseLock(){
   if(!firebaseEnabled || !lockRef) return;
-  // disable auto-push when releasing
-  allowAutoPush = false;
   lockRef.transaction(curr => {
     if(curr && curr.owner === clientId){
       return null;
@@ -328,23 +310,30 @@ function enableFirebaseIfConfigured(){
     dbRef = db.ref('futpro_rotacao');
     firebaseEnabled = true;
 
-    // initial load: always apply remote if exists, do NOT auto-push local
+    // initial load: merge based on updatedAt timestamp
     dbRef.once('value').then(snap => {
       const remote = snap.val();
-      if (remote && remote.state) {
+      if(remote && remote.state){
         const remoteState = remote.state;
         lastRemoteUpdatedAt = remoteState.updatedAt || null;
         lastRemoteState = remoteState;
 
-        // Apply remote state without pushing local automatically
-        state = { ...state, ...remoteState };
-        console.info('Firebase: applied remote state on initial load');
-        renderAll();
+        if(!state.updatedAt || (remoteState.updatedAt && remoteState.updatedAt > state.updatedAt)){
+          state = {...state, ...remoteState};
+          // normalize remote merge to avoid duplicates
+          normalizeState();
+          console.info('Firebase: applied remote state');
+          renderAll();
+        } else {
+          console.info('Firebase: kept local state (newer)');
+          // send local to remote if allowed
+          schedulePushStateToFirebase();
+        }
       } else {
-        // no remote state -> keep local but DO NOT push automatically
-        console.info('Firebase: no remote state on initial load; local preserved but not pushed');
+        // no remote state -> push local
+        pushStateToFirebaseImmediate();
       }
-    }).catch(e => console.warn('firebase once error', e));
+    }).catch(e=>console.warn('firebase once error', e));
 
     // listen for remote changes and apply only if remote is newer
     dbRef.on('value', snap=>{
@@ -356,6 +345,7 @@ function enableFirebaseIfConfigured(){
         lastRemoteState = remoteState;
         if(!state.updatedAt || (remoteState.updatedAt && remoteState.updatedAt > state.updatedAt)){
           state = {...state, ...remoteState};
+          normalizeState();
           console.info('Firebase: merged remote update');
           renderAll();
         }
@@ -374,8 +364,38 @@ const KEY = 'futpro_v3_3_state';
 let state = { playersQueue: [], teams: [], payments: {}, clearPaymentsOnLoad: false, timerSeconds: 7*60, soundOn: true, updatedAt: Date.now() };
 let firebasePause = false;
 
-function save(){ state.updatedAt = Date.now(); localStorage.setItem(KEY, JSON.stringify(state)); if(firebaseEnabled) schedulePushStateToFirebase(); }
+function save(){
+  // normalize before saving to avoid duplicates
+  normalizeState();
+  state.updatedAt = Date.now(); localStorage.setItem(KEY, JSON.stringify(state)); if(firebaseEnabled) schedulePushStateToFirebase();
+}
 function load(){ const v=localStorage.getItem(KEY); if(v){ try{ const p=JSON.parse(v); state = {...state, ...p}; }catch(e){console.warn(e);} } if(state.clearPaymentsOnLoad) state.payments={}; }
+
+// normalize state: remove duplicates ensuring each player appears once (teams preferred)
+function normalizeState(){
+  const seen = new Set();
+  state.teams = (state.teams || []).map(team => {
+    return (team || []).filter(name => {
+      if(!name) return false;
+      if(seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    });
+  }).filter(team => team.length > 0);
+
+  const newQueue = [];
+  (state.playersQueue || []).forEach(name => {
+    if(!name) return;
+    if(seen.has(name)) return; // already in a team
+    if(newQueue.indexOf(name) !== -1) return; // dedupe in queue
+    newQueue.push(name);
+    seen.add(name);
+  });
+  state.playersQueue = newQueue;
+
+  state.payments = state.payments || {};
+  uniquePlayers().forEach(p => { state.payments[p] = state.payments[p] || false; });
+}
 
 function formatTime(s){ const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `${m}:${sec}`; }
 function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } }
@@ -599,7 +619,6 @@ function promptMovePlayer(teamIdx, playerIdx){
 function handleTeamLoss(teamIndex){
   if(teamIndex<0||teamIndex>=state.teams.length) return;
   const losing = state.teams.splice(teamIndex,1)[0];
-  // fill incomplete teams
   let i = state.teams.findIndex(t => t.length < 5);
   while(i !== -1 && losing.length > 0){
     const need = 5 - state.teams[i].length;
@@ -607,7 +626,6 @@ function handleTeamLoss(teamIndex){
     state.teams[i].push(...take);
     i = state.teams.findIndex((t, idx) => t.length < 5 && idx > i);
   }
-  // leftover -> groups of 5 or incomplete
   while(losing.length >= 5){
     const t = losing.splice(0,5);
     state.teams.push(t);
