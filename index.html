@@ -135,11 +135,15 @@ button{background:var(--panel);color:var(--gold);border:2px solid var(--gold);pa
       <label style="align-self:center;margin-left:8px"><input type="checkbox" id="chkSound" checked> Som</label>
     </div>
     <div style="margin-top:10px">
+      <!-- Test button will now play ONLY the licensed final whistle -->
       <button id="btnTestWhistle" style="background:var(--gold);color:#000;border:2px solid #000;padding:10px 14px;border-radius:8px;font-weight:800">Testar Apito</button>
       <!-- New final whistle controls -->
       <button id="btnFinalWhistle" style="background:#000;color:#fff;border:2px solid #000;padding:10px 14px;border-radius:8px;font-weight:800;margin-left:8px">Apito Final</button>
       <label class="small" style="margin-left:8px"><input type="checkbox" id="chkFinalWhistle" checked> Usar apito final ao terminar</label>
-      <audio id="finalWhistle" src="https://drive.google.com/uc?export=download&id=1W6ap8YEj9Zn36qIMb6Y_pGaC20OQd6pc"></audio>
+
+      <!-- Licensed final whistle (Drive download link). This audio element is the single source of the final whistle sound used by Testar Apito and at timer end. -->
+      <audio id="finalWhistle" src="https://drive.google.com/uc?export=download&id=1W6ap8YEj9Zn36qIMb6Y_pGaC20OQd6pc" preload="auto" playsinline></audio>
+
       <div class="small" style="margin-top:6px;color:var(--muted)">Toque para ativar o som no navegador e testar o apito (recomendado antes do jogo).</div>
     </div>
   </div>
@@ -501,9 +505,7 @@ function escape(s=''){ return (''+s).replace(/&/g,'&amp;').replace(/</g,'&lt;').
 function escapeAttr(s=''){ return (''+s).replace(/\"/g,'&quot;'); }
 function uniquePlayers(){ const s=new Set(); state.playersQueue.forEach(p=>s.add(p)); state.teams.flat().forEach(p=>s.add(p)); return Array.from(s); }
 
-/* ========== DRAG & DROP ==========
-   (functions omitted here for brevity)
-*/
+/* ========== DRAG & DROP ========== */
 let currentDrag = null;
 function onDragStart(e, info){ currentDrag = info; try{ e.dataTransfer.setData('text/plain', JSON.stringify(info)); }catch(err){} }
 function allowDrop(e){ e.preventDefault(); const el = e.currentTarget; el.classList.add('drag-over'); }
@@ -684,32 +686,35 @@ document.getElementById('btnExportPayments').addEventListener('click', ()=>{ con
 queueList.addEventListener('dragover', (e)=> e.preventDefault());
 document.addEventListener('dragend', ()=> { currentDrag = null; clearDragOver(); });
 
-/* ========== TIMER & APITO (Duplo apito estilo FIFA) ==========
-   existing playWhistle retained and new playFinalWhistle added
+/* ========== TIMER & APITO (FINAL WHISTLE FROM LICENSED FILE) ==========
+   - Testar Apito and Apito Final now play only the licensed file (finalWhistle element).
+   - When timer ends, we play finalWhistle automatically (if chkFinalWhistle is checked and sound is enabled).
 */
 let timerInterval = null;
 document.getElementById('startBtn').addEventListener('click', ()=>{
   if(timerInterval) return;
   timerInterval = setInterval(()=>{
     if(state.timerSeconds>0){ state.timerSeconds--; timerDisplay.textContent = formatTime(state.timerSeconds); save(); }
-    else { clearInterval(timerInterval); timerInterval=null; if(state.soundOn) playWhistle(); setTimeout(()=> onTimerEndPrompt(),420); }
+    else { clearInterval(timerInterval); timerInterval=null; setTimeout(()=> onTimerEndPrompt(),420); }
   },1000);
 });
 document.getElementById('pauseBtn').addEventListener('click', ()=>{ if(timerInterval){ clearInterval(timerInterval); timerInterval=null; } });
 document.getElementById('resetBtnTimer').addEventListener('click', ()=>{ if(timerInterval){ clearInterval(timerInterval); timerInterval=null; } state.timerSeconds=7*60; timerDisplay.textContent = formatTime(state.timerSeconds); save(); });
 document.getElementById('chkSound').addEventListener('change', (e)=>{ state.soundOn = e.target.checked; save(); });
 
+// We keep an AudioContext only to satisfy mobile autoplay resume if needed, but the actual sound is played from the audio element.
 let audioCtx = null;
-function ensureAudioContext(){ if(!audioCtx){ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } }
+function ensureAudioContext(){ if(!audioCtx){ try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){ audioCtx = null; } } }
 
-/* play double whistle: two bursts, second slightly later. */
+/* playWhistle (synth) is left in the file as fallback but will NOT be used by Testar Apito or timer end. */
+
 function playWhistle(){
   try{
     ensureAudioContext();
+    if(!audioCtx) return;
     const now = audioCtx.currentTime;
     const burstDur = 1.2;
     const gap = 0.35;
-
     function scheduleBurst(offset, freqStart, gainPeak){
       const start = now + offset;
       const bufferSize = Math.floor(audioCtx.sampleRate * burstDur);
@@ -719,17 +724,14 @@ function playWhistle(){
         data[i] = (Math.random()*2 - 1) * Math.pow(1 - i/bufferSize, 0.9) * (0.95 + 0.05*Math.sin(i/80));
       }
       const noise = audioCtx.createBufferSource(); noise.buffer = noiseBuf;
-
       const bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass';
       bp.frequency.setValueAtTime(freqStart, start);
       bp.frequency.exponentialRampToValueAtTime(900, start + burstDur * 0.85);
       bp.Q.value = 8;
-
       const g = audioCtx.createGain();
       g.gain.setValueAtTime(0.0001, start);
       g.gain.exponentialRampToValueAtTime(gainPeak, start + 0.02);
       g.gain.exponentialRampToValueAtTime(0.0001, start + burstDur);
-
       const osc = audioCtx.createOscillator();
       osc.type = 'sawtooth';
       osc.frequency.setValueAtTime(freqStart * 1.02, start);
@@ -737,63 +739,69 @@ function playWhistle(){
       og.gain.setValueAtTime(0.0001, start);
       og.gain.exponentialRampToValueAtTime(0.12, start + 0.03);
       og.gain.exponentialRampToValueAtTime(0.0001, start + burstDur);
-
       noise.connect(bp);
       bp.connect(g);
       g.connect(audioCtx.destination);
       osc.connect(og);
       og.connect(audioCtx.destination);
-
       noise.start(start);
       noise.stop(start + burstDur + 0.02);
       osc.start(start);
       osc.stop(start + burstDur + 0.02);
     }
-
     scheduleBurst(0, 2600, 1.3);
     scheduleBurst(gap, 2200, 1.1);
-
-  }catch(e){ console.warn('Erro ao tocar apito:', e); }
+  }catch(e){ console.warn('Erro ao tocar apito (synth):', e); }
 }
 
-document.getElementById('btnTestWhistle').addEventListener('click', async ()=>{
-  try{ ensureAudioContext(); if(audioCtx.state === 'suspended') await audioCtx.resume(); playWhistle(); }catch(e){console.warn(e);} 
-});
-
-/* NEW: final long loud whistle — body (grave) + spike (agudo) + noise */
+/* NEW: final long loud whistle — play ONLY licensed audio element */
 function playFinalWhistle(){
   try{
-    ensureAudioContext();
+    // Resume audio context if it exists (helps some mobile browsers)
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
     const audioEl = document.getElementById('finalWhistle');
     if(!audioEl) return;
-    // resume audio context if needed
-    if(audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
+    // Ensure source is the licensed drive link (in case someone changed it)
+    // NOTE: if you later put the file in /assets, update this src accordingly.
     audioEl.pause();
     audioEl.currentTime = 0;
-    audioEl.play().catch(e=> console.warn('Erro ao reproduzir áudio finalWhistle:', e));
+    audioEl.play().catch(e=> console.warn('Erro ao reproduzir audio finalWhistle:', e));
     console.info('playFinalWhistle triggered (licensed file)');
-  }catch(e){ console.warn('Erro ao tocar apito final:', e); } 
+  }catch(e){ console.warn('Erro ao tocar apito final:', e); }
 }
 
-document.getElementById('btnFinalWhistle').addEventListener('click', async ()=>{
-  try{ ensureAudioContext(); if(audioCtx.state === 'suspended') await audioCtx.resume(); playFinalWhistle(); }catch(e){console.warn(e);} 
+/* Button handlers: Test and Final now call playFinalWhistle only */
+document.getElementById('btnTestWhistle').addEventListener('click', async (ev)=>{
+  try{
+    ensureAudioContext();
+    if(audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
+    playFinalWhistle();
+  }catch(e){ console.warn(e); }
 });
 
+document.getElementById('btnFinalWhistle').addEventListener('click', async (ev)=>{
+  try{
+    ensureAudioContext();
+    if(audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
+    playFinalWhistle();
+  }catch(e){ console.warn(e); }
+});
+
+/* onTimerEndPrompt: when timer ends, only trigger the licensed final whistle if chkFinalWhistle is checked and sound is enabled */
 function onTimerEndPrompt(){
   if(state.teams.length<2){
     alert('Tempo acabou — não há teams suficientes para registrar derrota.');
     return;
   }
-  // decide which whistle to play depending on checkbox
   try{
-    const useFinal = document.getElementById('chkFinalWhistle') && document.getElementById('chkFinalWhistle').checked;
-    if(state.soundOn){
-      if(useFinal) playFinalWhistle();
-      else playWhistle();
+    const useFinal = document.getElementById('chkFinalWhistle') ? document.getElementById('chkFinalWhistle').checked : true;
+    if(state.soundOn && useFinal){
+      // Try to resume audio context first (improves mobile behavior if user already interacted)
+      try{ ensureAudioContext(); if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{}); }catch(e){}
+      playFinalWhistle();
     }
   }catch(e){
     console.warn('Erro ao decidir apito:', e);
-    if(state.soundOn) playWhistle();
   }
 
   if(confirm('Tempo encerrado. Registrar derrota do time da frente (Time 1)? OK = Time 1 perdeu, Cancelar = Time 2 perdeu')){
