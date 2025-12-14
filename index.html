@@ -139,6 +139,7 @@ button{background:var(--panel);color:var(--gold);border:2px solid var(--gold);pa
       <!-- New final whistle controls -->
       <button id="btnFinalWhistle" style="background:#000;color:#fff;border:2px solid #000;padding:10px 14px;border-radius:8px;font-weight:800;margin-left:8px">Apito Final</button>
       <label class="small" style="margin-left:8px"><input type="checkbox" id="chkFinalWhistle" checked> Usar apito final ao terminar</label>
+      <audio id="finalWhistle" src="https://drive.google.com/uc?export=download&id=1W6ap8YEj9Zn36qIMb6Y_pGaC20OQd6pc"></audio>
       <div class="small" style="margin-top:6px;color:var(--muted)">Toque para ativar o som no navegador e testar o apito (recomendado antes do jogo).</div>
     </div>
   </div>
@@ -763,68 +764,15 @@ document.getElementById('btnTestWhistle').addEventListener('click', async ()=>{
 function playFinalWhistle(){
   try{
     ensureAudioContext();
-    const now = audioCtx.currentTime;
-    const totalDur = 3.0; // longa duração para final emocionante
-
-    // RUÍDO — sustained burst with shaped envelope
-    const bufferSize = Math.floor(audioCtx.sampleRate * totalDur);
-    const noiseBuf = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-    const data = noiseBuf.getChannelData(0);
-    for(let i=0;i<bufferSize;i++){
-      const t = i / bufferSize;
-      const env = Math.pow(1 - t, 1.1);
-      data[i] = (Math.random()*2 - 1) * env * (0.98 + 0.02*Math.sin(i/30));
-    }
-    const noise = audioCtx.createBufferSource(); noise.buffer = noiseBuf;
-
-    const bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass';
-    bp.frequency.setValueAtTime(1600, now);
-    bp.frequency.exponentialRampToValueAtTime(700, now + totalDur * 0.9);
-    bp.Q.value = 7;
-
-    const gNoise = audioCtx.createGain();
-    gNoise.gain.setValueAtTime(0.0001, now);
-    gNoise.gain.exponentialRampToValueAtTime(2.0, now + 0.02); // loud peak
-    gNoise.gain.exponentialRampToValueAtTime(0.0001, now + totalDur);
-
-    // Oscillator 1 — body (grave)
-    const osc1 = audioCtx.createOscillator();
-    osc1.type = 'triangle';
-    osc1.frequency.setValueAtTime(700, now);
-    osc1.frequency.exponentialRampToValueAtTime(400, now + totalDur * 0.95);
-    const g1 = audioCtx.createGain();
-    g1.gain.setValueAtTime(0.0001, now);
-    g1.gain.exponentialRampToValueAtTime(0.6, now + 0.03);
-    g1.gain.exponentialRampToValueAtTime(0.0001, now + totalDur);
-
-    // Oscillator 2 — sharp peak (agudo)
-    const osc2 = audioCtx.createOscillator();
-    osc2.type = 'sawtooth';
-    osc2.frequency.setValueAtTime(1800, now);
-    osc2.frequency.exponentialRampToValueAtTime(900, now + totalDur * 0.9);
-    const g2 = audioCtx.createGain();
-    g2.gain.setValueAtTime(0.0001, now);
-    g2.gain.exponentialRampToValueAtTime(0.9, now + 0.02);
-    g2.gain.exponentialRampToValueAtTime(0.0001, now + totalDur);
-
-    // Connections
-    noise.connect(bp);
-    bp.connect(gNoise);
-    gNoise.connect(audioCtx.destination);
-
-    osc1.connect(g1); g1.connect(audioCtx.destination);
-    osc2.connect(g2); g2.connect(audioCtx.destination);
-
-    // Start/stop
-    noise.start(now);
-    noise.stop(now + totalDur + 0.02);
-    osc1.start(now);
-    osc1.stop(now + totalDur + 0.02);
-    osc2.start(now);
-    osc2.stop(now + totalDur + 0.02);
-
-    console.info('playFinalWhistle triggered');
-  }catch(e){ console.warn('Erro ao tocar apito final:', e); }
+    const audioEl = document.getElementById('finalWhistle');
+    if(!audioEl) return;
+    // resume audio context if needed
+    if(audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
+    audioEl.pause();
+    audioEl.currentTime = 0;
+    audioEl.play().catch(e=> console.warn('Erro ao reproduzir áudio finalWhistle:', e));
+    console.info('playFinalWhistle triggered (licensed file)');
+  }catch(e){ console.warn('Erro ao tocar apito final:', e); } 
 }
 
 document.getElementById('btnFinalWhistle').addEventListener('click', async ()=>{
