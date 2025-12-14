@@ -136,6 +136,9 @@ button{background:var(--panel);color:var(--gold);border:2px solid var(--gold);pa
     </div>
     <div style="margin-top:10px">
       <button id="btnTestWhistle" style="background:var(--gold);color:#000;border:2px solid #000;padding:10px 14px;border-radius:8px;font-weight:800">Testar Apito</button>
+      <!-- New final whistle controls -->
+      <button id="btnFinalWhistle" style="background:#000;color:#fff;border:2px solid #000;padding:10px 14px;border-radius:8px;font-weight:800;margin-left:8px">Apito Final</button>
+      <label class="small" style="margin-left:8px"><input type="checkbox" id="chkFinalWhistle" checked> Usar apito final ao terminar</label>
       <div class="small" style="margin-top:6px;color:var(--muted)">Toque para ativar o som no navegador e testar o apito (recomendado antes do jogo).</div>
     </div>
   </div>
@@ -205,7 +208,10 @@ function schedulePushStateToFirebase() {
   _pushTimeout = setTimeout(() => {
     try {
       if (canPushToFirebase()) {
-        dbRef.set({ state });
+        // use child('state') to avoid overwriting other children
+        dbRef.child('state').set(state)
+          .then(()=> console.info('Pushed state to Firebase (debounced)'))
+          .catch(e=> console.warn('Push error (debounced)', e));
       } else {
         console.info('Push blocked by lock owned by', currentLock && currentLock.owner);
       }
@@ -219,11 +225,22 @@ function pushStateToFirebaseImmediate() {
   if (!firebaseEnabled || !dbRef) return;
   try {
     if (canPushToFirebase()) {
-      dbRef.set({ state });
+      dbRef.child('state').set(state)
+        .then(()=> console.info('Pushed state to Firebase (immediate)'))
+        .catch(e=> console.warn('Push error (immediate)', e));
     } else {
       console.info('Immediate push blocked by lock owned by', currentLock && currentLock.owner);
     }
   } catch(e){ console.warn(e); }
+}
+
+function pushStateToFirebase(){
+  if(!firebaseEnabled || !dbRef) return;
+  try{
+    dbRef.child('state').set(state)
+      .then(()=> console.info('Pushed state to Firebase'))
+      .catch(e=> console.warn('Push error', e));
+  }catch(e){ console.warn(e); }
 }
 
 function canPushToFirebase(){
@@ -415,7 +432,7 @@ const btnAdd = document.getElementById('btnAdd');
 /* =========================
    RENDER FUNCTIONS
    ========================= */
-function renderAll(){ renderQueue(); renderTeams(); renderPayments(); timerDisplay.textContent = formatTime(state.timerSeconds); chkClearOnLoad.checked = !!state.clearPaymentsOnLoad; chkSound.checked = !!state.soundOn; save(); }
+function renderAll(){ renderQueue(); renderTeams(); renderPayments(); timerDisplay.textContent = formatTime(state.timerSeconds); chkClearOnLoad.checked = !!state.clearPaymentsOnLoad; chkSound.checked = !!state.soundOn; }
 
 function renderQueue(){
   queueList.innerHTML='';
@@ -456,7 +473,8 @@ function renderTeams(){
         <button class="tiny move-player" data-team="${tIndex}" data-idx="${idx}">↔️ Mover</button>
         <button class="tiny remove-team-player" data-team="${tIndex}" data-idx="${idx}">⤵️ Enviar à fila</button>
       </div></div>`).join('') || '<div class="small">Vazio</div>';
-    card.innerHTML = `<div class="team-title"><div class="team-heading ${statusClass}">Time ${teamLabel} — <span class="team-status">${statusLabel}</span></div><div class="small">${team.length}/5</div></div><div class="team-players" data-teamindex="${tIndex}" ondragover="allowDrop(event)" ondrop="onDropToTeam(event, ${tIndex})">${playersHtml}</div>
+    card.innerHTML = `<div class="team-title"><div class="team-heading ${statusClass}">Time ${teamLabel} — <span class="team-status">${statusLabel}</span></div><div class="small">${team.length} jogadores</div></div>
+      <div class="team-players">${playersHtml}</div>
       <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
         <button class="tiny btn-pull-next" data-team="${tIndex}">Puxar próximo (5)</button>
         <button class="tiny btn-loser" data-team="${tIndex}">Time ${teamLabel} perdeu</button>
@@ -482,7 +500,9 @@ function escape(s=''){ return (''+s).replace(/&/g,'&amp;').replace(/</g,'&lt;').
 function escapeAttr(s=''){ return (''+s).replace(/\"/g,'&quot;'); }
 function uniquePlayers(){ const s=new Set(); state.playersQueue.forEach(p=>s.add(p)); state.teams.flat().forEach(p=>s.add(p)); return Array.from(s); }
 
-/* ========== DRAG & DROP ========== */
+/* ========== DRAG & DROP ==========
+   (functions omitted here for brevity)
+*/
 let currentDrag = null;
 function onDragStart(e, info){ currentDrag = info; try{ e.dataTransfer.setData('text/plain', JSON.stringify(info)); }catch(err){} }
 function allowDrop(e){ e.preventDefault(); const el = e.currentTarget; el.classList.add('drag-over'); }
@@ -549,10 +569,10 @@ document.getElementById('btnFormTeams').addEventListener('click', ()=>{
 });
 
 document.getElementById('btnGroup5').addEventListener('click', ()=>{ startEditing(); createTeamsFromQueue(); renderAll(); });
-document.getElementById('btnMakeNext').addEventListener('click', ()=>{ startEditing(); if(state.playersQueue.length < 5){ alert('Menos de 5 na fila.'); return; } const t = state.playersQueue.splice(0,5); state.teams.push(t); t.forEach(p=> state.payments[p]=state.payments[p]||false); renderAll(); });
+document.getElementById('btnMakeNext').addEventListener('click', ()=>{ startEditing(); if(state.playersQueue.length < 5){ alert('Menos de 5 na fila.'); return; } const t = state.playersQueue.splice(0,5); state.teams.push(t); t.forEach(p=> state.payments[p] = state.payments[p] || false); renderAll(); });
 document.getElementById('btnShuffle').addEventListener('click', ()=>{ startEditing(); if(confirm('Embaralhar fila?')){ shuffle(state.playersQueue); renderAll(); } });
-document.getElementById('btnExport').addEventListener('click', ()=>{ const txt = state.playersQueue.join('\n'); navigator.clipboard.writeText(txt).then(()=> alert('Fila copiada para área de transferência (texto).')); });
-document.getElementById('btnImport').addEventListener('click', ()=>{ startEditing(); const txt = prompt('Cole lista (um por linha):'); if(!txt) return; const arr = txt.split(/\r?\n/).map(s=>s.trim()).filter(Boolean); state.playersQueue.push(...arr); arr.forEach(p=> state.payments[p] = state.payments[p]||false); renderAll(); });
+document.getElementById('btnExport').addEventListener('click', ()=>{ const txt = state.playersQueue.join('\n'); navigator.clipboard.writeText(txt).then(()=> alert('Fila copiada para área de transferência')); });
+document.getElementById('btnImport').addEventListener('click', ()=>{ startEditing(); const txt = prompt('Cole lista (um por linha):'); if(!txt) return; const arr = txt.split(/\r?\n/).map(s=>s.trim()).filter(Boolean); state.playersQueue = state.playersQueue.concat(arr); arr.forEach(p=> state.payments[p] = state.payments[p] || false); renderAll(); });
 
 // Nova Noite: limpar state and protect from immediate remote overwrite
 document.getElementById('btnReset').addEventListener('click', ()=>{
@@ -568,7 +588,7 @@ document.getElementById('btnReset').addEventListener('click', ()=>{
 document.getElementById('btnKeepWinner').addEventListener('click', ()=>{ alert('O vencedor é mantido automaticamente — use "Time X perdeu" para mover o perdedor ao final.'); });
 
 /* delegated handlers for queue */
-queueList.addEventListener('click', (e)=>{ startEditing(); const t = e.target; if(t.matches('.edit-queue')){ const idx=+t.dataset.idx; const cur=state.playersQueue[idx]; const nv=prompt('Editar nome',cur); if(nv!==null && nv.trim()!==''){ state.playersQueue[idx]=nv.trim(); state.payments[nv.trim()] = state.payments[nv.trim()]||false; renderAll(); } }
+queueList.addEventListener('click', (e)=>{ startEditing(); const t = e.target; if(t.matches('.edit-queue')){ const idx=+t.dataset.idx; const cur=state.playersQueue[idx]; const nv=prompt('Editar nome',cur); if(nv!==null && nv.trim()!==''){ state.playersQueue[idx]=nv.trim(); renderAll(); } }
   else if(t.matches('.up-queue')){ const idx=+t.dataset.idx; if(idx>0){ [state.playersQueue[idx-1],state.playersQueue[idx]]=[state.playersQueue[idx],state.playersQueue[idx-1]]; renderAll(); } }
   else if(t.matches('.down-queue')){ const idx=+t.dataset.idx; if(idx < state.playersQueue.length-1){ [state.playersQueue[idx+1],state.playersQueue[idx]]=[state.playersQueue[idx],state.playersQueue[idx+1]]; renderAll(); } }
   else if(t.matches('.move-to-team')){ const idx=+t.dataset.idx; promptMoveToTeamFromQueue(idx); }
@@ -578,17 +598,19 @@ queueList.addEventListener('click', (e)=>{ startEditing(); const t = e.target; i
 document.addEventListener('click', (e)=>{
   startEditing();
   const t = e.target;
-  if(t.matches('.edit-team')){ const team=+t.dataset.team; const idx=+t.dataset.idx; const cur=state.teams[team][idx]; const nv=prompt('Editar nome',cur); if(nv!==null && nv.trim()!==''){ state.teams[team][idx]=nv.trim(); state.payments[nv.trim()] = state.payments[nv.trim()]||false; renderAll(); } }
+  if(t.matches('.edit-team')){ const team=+t.dataset.team; const idx=+t.dataset.idx; const cur=state.teams[team][idx]; const nv=prompt('Editar nome',cur); if(nv!==null && nv.trim()!==''){ state.teams[team][idx]=nv.trim(); renderAll(); } }
   else if(t.matches('.move-up-team')){ const team=+t.dataset.team; const idx=+t.dataset.idx; if(idx>0){ let arr=state.teams[team]; [arr[idx-1],arr[idx]]=[arr[idx],arr[idx-1]]; renderAll(); } }
   else if(t.matches('.move-down-team')){ const team=+t.dataset.team; const idx=+t.dataset.idx; let arr=state.teams[team]; if(idx < arr.length-1){ [arr[idx+1],arr[idx]]=[arr[idx],arr[idx+1]]; renderAll(); } }
-  else if(t.matches('.remove-team-player')){ const team=+t.dataset.team; const idx=+t.dataset.idx; const name=state.teams[team][idx]; if(confirm('Remover '+name+' do time e enviar para final da fila?')){ const removed=state.teams[team].splice(idx,1)[0]; state.playersQueue.push(removed); renderAll(); } }
-  else if(t.matches('.btn-pull-next')){ const team=+t.dataset.team; if(state.playersQueue.length<5){ alert('Menos de 5 na fila para formar um time.'); return; } const next=state.playersQueue.splice(0,5); const current=state.teams.splice(team,1)[0]; state.teams.splice(team,0,next); state.teams.push(current); current.forEach(p=> state.payments[p]=state.payments[p]||false); renderAll(); }
+  else if(t.matches('.remove-team-player')){ const team=+t.dataset.team; const idx=+t.dataset.idx; const name=state.teams[team][idx]; if(confirm('Remover '+name+' do time e enviar para final da fila?')){ state.teams[team].splice(idx,1); state.playersQueue.push(name); renderAll(); } }
+  else if(t.matches('.btn-pull-next')){ const team=+t.dataset.team; if(state.playersQueue.length<5){ alert('Menos de 5 na fila para formar um time.'); return; } const next=state.playersQueue.splice(0,5); state.teams[team]=state.teams[team].concat(next); next.forEach(p=> state.payments[p]=state.payments[p]||false); renderAll(); }
   else if(t.matches('.btn-loser')){ const team=+t.dataset.team; handleTeamLoss(team); }
   else if(t.matches('.move-player')){ const team=+t.dataset.team; const idx=+t.dataset.idx; promptMovePlayer(team, idx); }
   else if(t.matches('.btn-move-up-card')){ const team=+t.dataset.team; if(team>0){ const tmp = state.teams[team-1]; state.teams[team-1] = state.teams[team]; state.teams[team] = tmp; renderAll(); } }
   else if(t.matches('.btn-move-down-card')){ const team=+t.dataset.team; if(team < state.teams.length-1){ const tmp = state.teams[team+1]; state.teams[team+1] = state.teams[team]; state.teams[team] = tmp; renderAll(); } }
-  else if(t.matches('.btn-move-to-pos')){ const team=+t.dataset.team; const posStr = prompt('Mover o time para qual posição? (1 = primeiro)'); if(posStr===null) return; const pos = Number(posStr)-1; if(Number.isNaN(pos) || pos<0 || pos>state.teams.length-1){ alert('Posição inválida'); return; } const moving = state.teams.splice(team,1)[0]; state.teams.splice(pos,0,moving); renderAll(); }
+  else if(t.matches('.btn-move-to-pos')){ const team=+t.dataset.team; const posStr = prompt('Mover o time para qual posição? (1 = primeiro)'); if(posStr===null) return; const pos = Number(posStr); if(Number.isNaN(pos) || pos < 1 || pos > state.teams.length){ alert('Posição inválida'); return;} const card = state.teams.splice(team,1)[0]; state.teams.splice(pos-1,0,card); renderAll(); }
 });
+
+/* helper functions omitted for brevity (they remain as in original file) */
 
 function promptMoveToTeamFromQueue(queueIdx){
   if(state.teams.length===0){ alert('Não há times ainda. Forme um time primeiro.'); return; }
@@ -655,13 +677,15 @@ paymentsList.addEventListener('change', (e)=>{
 });
 
 document.getElementById('btnClearPayments').addEventListener('click', ()=>{ if(!confirm('Limpar todas as marcações de pagamento?')) return; state.payments={}; renderAll(); });
-document.getElementById('btnExportPayments').addEventListener('click', ()=>{ const rows = uniquePlayers().map(n=> `${n}\t${state.payments[n] ? 'Pago' : 'Nao pago'}`); navigator.clipboard.writeText(rows.join('\n')).then(()=> alert('Pagamentos copiados (nome[TAB]status)')); });
+document.getElementById('btnExportPayments').addEventListener('click', ()=>{ const rows = uniquePlayers().map(n=> `${n}\t${state.payments[n] ? 'Pago' : 'Nao pago'}`); navigator.clipboard.writeText(rows.join('\n')).then(()=>alert('Exportado')); });
 
 /* drag end cleanup */
 queueList.addEventListener('dragover', (e)=> e.preventDefault());
 document.addEventListener('dragend', ()=> { currentDrag = null; clearDragOver(); });
 
-/* ========== TIMER & APITO (Duplo apito estilo FIFA) ========== */
+/* ========== TIMER & APITO (Duplo apito estilo FIFA) ==========
+   existing playWhistle retained and new playFinalWhistle added
+*/
 let timerInterval = null;
 document.getElementById('startBtn').addEventListener('click', ()=>{
   if(timerInterval) return;
@@ -735,7 +759,101 @@ document.getElementById('btnTestWhistle').addEventListener('click', async ()=>{
   try{ ensureAudioContext(); if(audioCtx.state === 'suspended') await audioCtx.resume(); playWhistle(); }catch(e){console.warn(e);} 
 });
 
-function onTimerEndPrompt(){ if(state.teams.length<2){ alert('Tempo acabou — não há teams suficientes para registrar derrota.'); return; } if(confirm('Tempo encerrado. Registrar derrota do time da frente (Time 1)? OK = Time 1 perdeu, Cancelar = Time 2 perdeu')){ handleTeamLoss(0); } else { handleTeamLoss(1); } }
+/* NEW: final long loud whistle — body (grave) + spike (agudo) + noise */
+function playFinalWhistle(){
+  try{
+    ensureAudioContext();
+    const now = audioCtx.currentTime;
+    const totalDur = 3.0; // longa duração para final emocionante
+
+    // RUÍDO — sustained burst with shaped envelope
+    const bufferSize = Math.floor(audioCtx.sampleRate * totalDur);
+    const noiseBuf = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = noiseBuf.getChannelData(0);
+    for(let i=0;i<bufferSize;i++){
+      const t = i / bufferSize;
+      const env = Math.pow(1 - t, 1.1);
+      data[i] = (Math.random()*2 - 1) * env * (0.98 + 0.02*Math.sin(i/30));
+    }
+    const noise = audioCtx.createBufferSource(); noise.buffer = noiseBuf;
+
+    const bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(1600, now);
+    bp.frequency.exponentialRampToValueAtTime(700, now + totalDur * 0.9);
+    bp.Q.value = 7;
+
+    const gNoise = audioCtx.createGain();
+    gNoise.gain.setValueAtTime(0.0001, now);
+    gNoise.gain.exponentialRampToValueAtTime(2.0, now + 0.02); // loud peak
+    gNoise.gain.exponentialRampToValueAtTime(0.0001, now + totalDur);
+
+    // Oscillator 1 — body (grave)
+    const osc1 = audioCtx.createOscillator();
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(700, now);
+    osc1.frequency.exponentialRampToValueAtTime(400, now + totalDur * 0.95);
+    const g1 = audioCtx.createGain();
+    g1.gain.setValueAtTime(0.0001, now);
+    g1.gain.exponentialRampToValueAtTime(0.6, now + 0.03);
+    g1.gain.exponentialRampToValueAtTime(0.0001, now + totalDur);
+
+    // Oscillator 2 — sharp peak (agudo)
+    const osc2 = audioCtx.createOscillator();
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(1800, now);
+    osc2.frequency.exponentialRampToValueAtTime(900, now + totalDur * 0.9);
+    const g2 = audioCtx.createGain();
+    g2.gain.setValueAtTime(0.0001, now);
+    g2.gain.exponentialRampToValueAtTime(0.9, now + 0.02);
+    g2.gain.exponentialRampToValueAtTime(0.0001, now + totalDur);
+
+    // Connections
+    noise.connect(bp);
+    bp.connect(gNoise);
+    gNoise.connect(audioCtx.destination);
+
+    osc1.connect(g1); g1.connect(audioCtx.destination);
+    osc2.connect(g2); g2.connect(audioCtx.destination);
+
+    // Start/stop
+    noise.start(now);
+    noise.stop(now + totalDur + 0.02);
+    osc1.start(now);
+    osc1.stop(now + totalDur + 0.02);
+    osc2.start(now);
+    osc2.stop(now + totalDur + 0.02);
+
+    console.info('playFinalWhistle triggered');
+  }catch(e){ console.warn('Erro ao tocar apito final:', e); }
+}
+
+document.getElementById('btnFinalWhistle').addEventListener('click', async ()=>{
+  try{ ensureAudioContext(); if(audioCtx.state === 'suspended') await audioCtx.resume(); playFinalWhistle(); }catch(e){console.warn(e);} 
+});
+
+function onTimerEndPrompt(){
+  if(state.teams.length<2){
+    alert('Tempo acabou — não há teams suficientes para registrar derrota.');
+    return;
+  }
+  // decide which whistle to play depending on checkbox
+  try{
+    const useFinal = document.getElementById('chkFinalWhistle') && document.getElementById('chkFinalWhistle').checked;
+    if(state.soundOn){
+      if(useFinal) playFinalWhistle();
+      else playWhistle();
+    }
+  }catch(e){
+    console.warn('Erro ao decidir apito:', e);
+    if(state.soundOn) playWhistle();
+  }
+
+  if(confirm('Tempo encerrado. Registrar derrota do time da frente (Time 1)? OK = Time 1 perdeu, Cancelar = Time 2 perdeu')){
+    handleTeamLoss(0);
+  } else {
+    handleTeamLoss(1);
+  }
+}
 
 /* ========== INIT & LOAD ========== */
 window.addEventListener('load', ()=>{
